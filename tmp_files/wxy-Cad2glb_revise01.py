@@ -1,16 +1,17 @@
 #--------------------------------------------------------	
 #	用于CATIA转GLB
 #   脚本的执行逻辑为
-#       1.从指定目录读取指定类型的文件，进行处理后分别导出
-#           操作：曲面细分、修复网格、网格抽取
+#       1.从指定目录读取指定类型的文件，进行处理后分别导出。
+#           操作：曲面细分、隐藏删除、修复网格、网格抽取、生成LOD链、导出全部节点
 #       2.执行结束后在场景中再次选中一些节点，可以单独导出选中部分
 #         （1）其中同级关系的节点分别导出，选中节点中如果存在父子关系（包括祖孙关系），则只导出子（孙）节点
 #         （2）不可以导出empty occurrence
 #   需要更新：
-#   （1）选中隐藏并删除 ok 
-#   （2）导出所有节点 (todo隐藏删除的问题)
-#   （3）同名的问题 ok 给导出的文件命名加了ID
-#	（4）改动了脚本的顺序，只有当场景中为空时才会导入模型，场景中不为空则只执行选中导出 ok
+#   （1）选中隐藏并删除
+#   （2）导出所有节点
+#   （3）ID+名字避免（可能的）重名覆盖
+#	（4）改动了脚本的顺序，只有当场景中为空时才会导入模型，场景中不为空则只执行选中导出
+#	（5）以本地时间为文件夹命名，区分每次执行结果
 #--------------------------------------------------------
 from fileinput import filename
 from os import listdir
@@ -45,7 +46,7 @@ _inputDirectory = r"G:\S2021-2022\task\yuan\0505\0000001-TESLA"
 inputDirectory = _inputDirectory.replace('\\','/')
 fileFormat = "CATProduct"
 #导出文件
-_outputDirectory = r"G:\S2021-2022\task\yuan\0505\test\TESLA_test\0510"
+_outputDirectory = r"G:\S2021-2022\task\yuan\0509\test_script\0515"
 outputDirectory = _outputDirectory.replace('\\','/')
 fileFormat_output = "glb"
 #-----------------------------------------------------------------
@@ -149,6 +150,39 @@ def getIDName(occurrence):
 	IDName = "[" + Id + "] " + name
 	return IDName
 
+def exportDefinitionOccurrence(target,all_occurrences,raw_time,outputDirectory,outputFormat):
+    all_occurrences.append(target)
+    getChildOccurrences(target,all_occurrences)
+    #对每个子节点，进行有无Definition的判断
+    for occurrence in all_occurrences:
+        metadata = scene.getComponent(occurrence, 5) 
+        if(metadata):
+            try:
+                definition = scene.getMetadata(metadata,"Definition")
+                print("当前的节点的描述信息：",definition)
+                scene.clearSelection()
+                scene.select([occurrence])
+                targetName = core.getProperty(target, "Name") 
+                IDName = getIDName(occurrence)
+                fileName = IDName + "." + outputFormat                    
+                filePath = join(outputDirectory,raw_time,targetName,fileName)
+                print("当前节点的路径信息：",filePath)
+                io.exportSelection(filePath)
+            except:
+                print("当前节点有Metadata组件，但是没有definition")
+        else:
+            print("当前选中节点没有Metadata组件")
+
+def exportModels(target,outputDirectory,outputFormat):
+	scene.clearSelection()
+	process([target])#只选中并删除当前这一个模型的隐藏部分
+	IDName = getIDName(target)
+	fileName = replaceFileExtension(IDName,outputFormat)
+	filePath = join(outputDirectory,fileName)
+	scene.select([target])	
+	io.exportSelection(filePath)
+
+raw_time = time.strftime("%Y-%m-%d, %H：%M：%S", time.localtime())
 #如果场景为空，导入并操作；如果场景不为空，选中并导出
 root = scene.getRoot()#根节点的ID
 childs = scene.getChildren(root)#场景中所有的模型的ID的列表
@@ -165,40 +199,16 @@ if (childs == []):
 	root = scene.getRoot()#根节点的ID
 	childs = scene.getChildren(root)#场景中所有的模型的ID的列表
 	for child in childs:
-		scene.clearSelection()
-		process([child])#只选中并删除当前这一个模型的隐藏部分
-		IDName = getIDName(child)
-		fileName = replaceFileExtension(IDName,fileFormat_output)
-		filePath = join(outputDirectory,fileName)
-		scene.select([child])	
-		io.exportSelection(filePath)
-		#获得当前模型的所有子节点
+		#导出所有模型文件
+		exportModels(child,outputDirectory,fileFormat_output)
+		#导出所有具有definition的节点
 		all_occurrences = []
-		getChildOccurrences(child,all_occurrences)
-		#对每个子节点，进行有无Definition的判断
-		for occurrence in all_occurrences:
-			metadata = scene.getComponent(occurrence, 5) 
-			if(metadata):
-				try:
-					definition = scene.getMetadata(metadata,"Definition")
-					print("看下是哪些：",definition)
-					scene.clearSelection()
-					scene.select([occurrence])
-					IDName = getIDName(occurrence)
-					fileName = IDName + "." +fileFormat_output
-					filePath = join(join(outputDirectory,"单独导出/"),fileName)
-					io.exportSelection(filePath)
-				except:
-					print("当前节点有Metadata组件，但是没有definition")
-			else:
-				print("当前选中节点没有Metadata组件")		
-	scene.clearSelection() 
-		
+		exportDefinitionOccurrence(child,all_occurrences,raw_time,outputDirectory,fileFormat_output)		
+	scene.clearSelection() 		
 #场景不为空
 else:
   root = scene.getSelectedOccurrences()
   print("对选中内容导出：------------------------------------------------------------------")
-  raw_time = time.strftime("%Y-%m-%d, %H：%M：%S", time.localtime())
   new_outputDirectory = join(outputDirectory,"手动选中导出",raw_time)
   exportOccurrence(root,new_outputDirectory,fileFormat_output)	
   scene.clearSelection() 
